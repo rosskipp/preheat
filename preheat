@@ -1,0 +1,103 @@
+import os
+import sys
+
+# Make sure the Dropbox module is installed
+try:
+  from dropbox.client import DropboxOAuth2FlowNoRedirect, DropboxClient
+  from dropbox import rest as dbrest
+except ImportError:
+  print 'You need to install the Dropbox module first. Use "pip install dropbox"'
+  sys.exit(1)
+
+def choose_file(metadata):
+  print "Found multiple candidates in your Dropbox account."
+  for index in range(len(metadata)):
+    print '   [%i]: %s' % (index, metadata[index]['path'])
+
+  selection = int(raw_input("Which file would you like to pull down: "))
+  return metadata[selection]
+
+app_key = "APP_KEY"
+app_secret = "APP_SECRET"
+
+if app_key == "APP_KEY" or app_secret == "APP_SECRET":
+  print 'You need to set app_key and app_secret. See lines 20 and 21 in preheat'
+  sys.exit(1)
+
+app_folder = os.getenv('APPDATA') + '\\HardlySoftware\\'
+token_file = app_folder + "token"
+access_token = None
+
+try:
+  with open(token_file, 'r') as f:
+    access_token = f.read()
+except IOError:
+    access_token = None
+
+if access_token == None:
+  flow = DropboxOAuth2FlowNoRedirect(app_key, app_secret)
+
+  authorize_url = flow.start()
+  print '1. Go to: ' + authorize_url
+  print '2. Click "Allow" (you might have to log in first)'
+  print '3. Copy the authorization code.'
+  code = raw_input("Enter the authorization code here: ").strip()
+
+  try:
+    access_token, user_id = flow.finish(code)
+  except dbrest.ErrorResponse, e:
+    print('Error: %s' % (e,))
+    print 'Make sure you have created your Dropbox app and entered the correct authorization code'
+    sys.exit(1)
+
+  if not os.path.exists(app_folder):
+    os.makedirs(app_folder)
+
+  with open(token_file, 'w') as f:
+    f.write(access_token)
+
+  print 'Account Linked!'
+
+client = DropboxClient(access_token)
+# Add a test to see if the client is valid
+
+if len(sys.argv) >= 2:
+  target_filename = str(sys.argv[1])
+  # Try to pull the file from dropbox
+  metadata = client.search("/", target_filename)
+  
+  # if metadata has more than one item prompt the user which file to pull
+  target_meta = None
+  if len(metadata) > 1:
+    target_meta = choose_file(metadata)
+  elif len(metadata) == 0:
+    target_meta = None
+  else:
+    target_meta = metadata[0]
+
+  if target_meta != None:
+    out = open(target_filename, 'wb')
+    f, meta = client.get_file_and_metadata(target_meta['path'])
+    with f:
+      out.write(f.read())
+    out.close()
+  else:
+    # See if the file is local
+    try:
+      with open(target_filename, 'r') as f:
+        print 'I did not find that file in your Dropbox but did find it locally'
+    except IOError:
+        print 'Could not find ' + target_filename + ' in your Dropbox or locally. Check the name and try again.'
+        sys.exit(1)
+
+    choice = raw_input("Would you like to run the local file (y/n)? ")
+    if choice.upper() != 'Y':
+      sys.exit(1)
+
+  # run the downloaded file
+  os.system(target_filename)
+
+else:
+  print "You forgot to tell me which file to preheat."
+  print "Usage:"
+  print "    [sudo] python preheat [target file to launch]"
