@@ -1,12 +1,13 @@
 import os
 import sys
+from os.path import expanduser
 
 # Make sure the Dropbox module is installed
 try:
   from dropbox.client import DropboxOAuth2FlowNoRedirect, DropboxClient
   from dropbox import rest as dbrest
 except ImportError:
-  print 'You need to install the Dropbox module first. Use "pip install dropbox"'
+  print 'You need to install the Dropbox module first. Use "sudo pip install dropbox"'
   sys.exit(1)
 
 def choose_file(metadata):
@@ -19,13 +20,23 @@ def choose_file(metadata):
 
 app_key = "APP_KEY"
 app_secret = "APP_SECRET"
+app_folder = None
+token_file = None
 
 if app_key == "APP_KEY" or app_secret == "APP_SECRET":
   print 'You need to set app_key and app_secret. See lines 20 and 21 in preheat'
   sys.exit(1)
 
-app_folder = os.getenv('APPDATA') + '\\HardlySoftware\\'
-token_file = app_folder + "token"
+if(os.name == 'nt'):
+  app_folder = os.getenv('APPDATA') + '\\HardlySoftware\\'
+  token_file = app_folder + "token"
+elif(os.name == 'posix'):
+  app_folder = expanduser('~')
+  token_file = app_folder + "/.preheat"
+else:
+  print 'You are running preheat on an unsupported operating system.'
+  sys.exit(1)
+
 access_token = None
 
 try:
@@ -95,7 +106,10 @@ if len(sys.argv) >= 2:
       sys.exit(1)
 
   # run the downloaded file
-  os.system(target_filename)
+  if(os.name == 'nt'):
+    os.system('python ' + target_filename)
+  else:
+    os.system('sudo python ' + target_filename)
 
 else:
   print "You forgot to tell me which file to preheat."
