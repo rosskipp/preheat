@@ -10,6 +10,41 @@ except ImportError:
   print 'You need to install the Dropbox module first. Use "sudo pip install dropbox"'
   sys.exit(1)
 
+def check_for_arg(arg):
+  for index in range(len(sys.argv)):
+    if str(sys.argv[index]) == arg:
+      return True
+
+  return False
+
+def create_dir(path):
+  if not os.path.exists(path):
+    os.makedirs(path);
+
+def get_file(client, base_path, file_data):
+  target_filename = file_data['path'].replace(base_path, "")
+  # print '  Creating file: %s' % (target_filename)
+
+  out = open(target_filename, 'wb')
+  f, meta = client.get_file_and_metadata(file_data['path'])
+  with f:
+    out.write(f.read())
+  out.close()
+
+def get_entire_folder(client, base_path, folder_path):
+
+  folder_data = client.metadata(folder_path)
+
+  for index in range(len(folder_data['contents'])):
+    if(folder_data['contents'][index]['is_dir']):
+      new_folder = folder_data['contents'][index]['path'].replace(base_path, "")
+      # print "Creating folder: " + new_folder
+      create_dir(new_folder)
+      get_entire_folder(client, base_path, folder_data['contents'][index]['path'])
+    else:
+      get_file(client, base_path, folder_data['contents'][index])
+
+
 def choose_file(metadata):
   print "Found multiple candidates in your Dropbox account."
   for index in range(len(metadata)):
@@ -87,11 +122,15 @@ if len(sys.argv) >= 2:
     target_meta = metadata[0]
 
   if target_meta != None:
-    out = open(target_filename, 'wb')
-    f, meta = client.get_file_and_metadata(target_meta['path'])
-    with f:
-      out.write(f.read())
-    out.close()
+    last_slash = target_meta['path'].rfind("/")
+    folder = target_meta['path'][:(last_slash + 1)]
+
+    if check_for_arg('-f'):
+      # Pull all files from the same folder
+      get_entire_folder(client, folder, folder)
+    else:
+      get_file(client, folder, target_meta)
+
   else:
     # See if the file is local
     try:
@@ -106,10 +145,11 @@ if len(sys.argv) >= 2:
       sys.exit(1)
 
   # run the downloaded file
-  if(os.name == 'nt'):
-    os.system('python ' + target_filename)
-  else:
-    os.system('sudo python ' + target_filename)
+  if(not check_for_arg('-d')):
+    if(os.name == 'nt'):
+      os.system('python ' + target_filename)
+    else:
+      os.system('sudo python ' + target_filename)
 
 else:
   print "You forgot to tell me which file to preheat."
