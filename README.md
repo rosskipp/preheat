@@ -22,6 +22,7 @@ The first time you use ```preheat``` it will ask you to authorize your newly cre
 
 ###Options
 The following are the available options when running the ```preheat``` script.
+
 | Option          | Purpose        |
 | :-------------: | :------------- |
 | -d | Download the target file only. Do not attempt to run it.  |
