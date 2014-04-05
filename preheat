@@ -1,5 +1,6 @@
-import os
-import sys
+#!/usr/bin/env python
+
+import os, sys, pwd, grp, json
 from os.path import expanduser
 
 # Make sure the Dropbox module is installed
@@ -10,6 +11,139 @@ except ImportError:
   print 'You need to install the Dropbox module first. Use "sudo pip install dropbox"'
   sys.exit(1)
 
+class Preheat(object):
+  """docstring for Preheat"""
+  def __init__(self):
+
+    self.data_dir = None
+    self.config_file = None
+    self.config = {'key':None, 'secret':None, 'token':None}
+
+
+    # Installed directory
+    self.program_dir = os.path.dirname(os.path.realpath(__file__))
+
+    if(os.name == 'posix'):
+      self.data_dir = expanduser('~') + "/.preheat"
+      self.config_file = self.data_dir + "/config.json"
+    else:
+      print 'You are running preheat on an unsupported operating system.'
+      sys.exit(1)
+
+    # Create folder if it doesn't exist along with config file
+    if not os.path.exists(self.data_dir):
+      os.makedirs(self.data_dir)
+      with open(self.config_file, 'w') as f:
+        json.dump(self.config, f)
+
+    # Read configuration settings
+    with open(self.config_file, 'r') as f:
+      self.config = json.load(f)
+
+    if self.config['key'] == None or self.config['secret'] == None:
+      print 'You need to set key and secret in config.json located at ' + self.config_file
+      sys.exit(1)
+
+  # def set_owner(self, path):
+  #   try:
+  #     gid = grp.getgrnam(group)
+  #     uid = pwd.getpwnam(user)
+  #     os.chown(path, uid, gid)
+  #   except KeyError:
+  #     print 'Invalid user or group'
+
+  def create_dir(self, path):
+    if not os.path.exists(path):
+      os.makedirs(path)
+      # set_owner(path)
+
+  def choose_file(self, metadata):
+    print "Found multiple candidates in your Dropbox account."
+    for index in range(len(metadata)):
+      print '   [%i]: %s' % (index, metadata[index]['path'])
+
+    selection = int(raw_input("Which file would you like to pull down: "))
+    return metadata[selection]
+
+  def get_file(self, base_path, file_data):
+    target_filename = file_data['path'].replace(base_path, "")
+    # print '  Creating file: %s' % (target_filename)
+
+    out = open(target_filename, 'wb')
+    f, meta = self.dropbox_client.get_file_and_metadata(file_data['path'])
+    with f:
+      out.write(f.read())
+    out.close()
+    # set_owner(target_filename)
+
+  def get_entire_folder(self, base_path, folder_path):
+
+    folder_data = self.dropbox_client.metadata(folder_path)
+
+    for index in range(len(folder_data['contents'])):
+      if(folder_data['contents'][index]['is_dir']):
+        new_folder = folder_data['contents'][index]['path'].replace(base_path, "")
+        # print "Creating folder: " + new_folder
+        self.create_dir(new_folder)
+        self.get_entire_folder(base_path, folder_data['contents'][index]['path'])
+      else:
+        self.get_file(base_path, folder_data['contents'][index])
+
+
+  def is_authorized(self):
+    if self.config['token'] != None:
+      self.dropbox_client = DropboxClient(self.config['token'])
+      return True;
+    else:
+      return False;
+
+  def authorize(self):
+    flow = DropboxOAuth2FlowNoRedirect(self.config['key'], self.config['secret'])
+
+    authorize_url = flow.start()
+    print '1. Go to: ' + authorize_url
+    print '2. Click "Allow" (you might have to log in first)'
+    print '3. Copy the authorization code.'
+    code = raw_input("Enter the authorization code here: ").strip()
+
+    try:
+      self.config['token'], user_id = flow.finish(code)
+    except dbrest.ErrorResponse, e:
+      print('Error: %s' % (e,))
+      print 'Make sure you have created your Dropbox app and entered the correct authorization code'
+      sys.exit(1)
+
+    with open(self.config_file, 'w') as f:
+        json.dump(self.config, f)
+
+    self.dropbox_client = DropboxClient(self.config['token'])
+
+  def fetch(self, filename, recurse):
+    if(self.dropbox_client == None):
+      print "No Dropbox client has been created. Make sure you have called is_authorized or authorize"
+    
+    metadata = self.dropbox_client.search("/", filename)
+    
+    # if metadata has more than one item prompt the user which file to pull
+    target_meta = None
+    if len(metadata) > 1:
+      target_meta = self.choose_file(metadata)
+    elif len(metadata) == 0:
+      target_meta = None
+    else:
+      target_meta = metadata[0]
+
+    if target_meta != None:
+      last_slash = target_meta['path'].rfind("/")
+      folder = target_meta['path'][:(last_slash + 1)]
+
+      if recurse:
+        # Pull all files from the same folder as well as subfolders
+        self.get_entire_folder(folder, folder)
+      else:
+        self.get_file(folder, target_meta)
+
+
 def check_for_arg(arg):
   for index in range(len(sys.argv)):
     if str(sys.argv[index]) == arg:
@@ -17,141 +151,18 @@ def check_for_arg(arg):
 
   return False
 
-def create_dir(path):
-  if not os.path.exists(path):
-    os.makedirs(path);
+piClient = Preheat()
 
-def get_file(client, base_path, file_data):
-  target_filename = file_data['path'].replace(base_path, "")
-  # print '  Creating file: %s' % (target_filename)
-
-  out = open(target_filename, 'wb')
-  f, meta = client.get_file_and_metadata(file_data['path'])
-  with f:
-    out.write(f.read())
-  out.close()
-
-def get_entire_folder(client, base_path, folder_path):
-
-  folder_data = client.metadata(folder_path)
-
-  for index in range(len(folder_data['contents'])):
-    if(folder_data['contents'][index]['is_dir']):
-      new_folder = folder_data['contents'][index]['path'].replace(base_path, "")
-      # print "Creating folder: " + new_folder
-      create_dir(new_folder)
-      get_entire_folder(client, base_path, folder_data['contents'][index]['path'])
-    else:
-      get_file(client, base_path, folder_data['contents'][index])
-
-
-def choose_file(metadata):
-  print "Found multiple candidates in your Dropbox account."
-  for index in range(len(metadata)):
-    print '   [%i]: %s' % (index, metadata[index]['path'])
-
-  selection = int(raw_input("Which file would you like to pull down: "))
-  return metadata[selection]
-
-app_key = "APP_KEY"
-app_secret = "APP_SECRET"
-app_folder = None
-token_file = None
-
-if app_key == "APP_KEY" or app_secret == "APP_SECRET":
-  print 'You need to set app_key and app_secret. See lines 20 and 21 in preheat'
-  sys.exit(1)
-
-if(os.name == 'nt'):
-  app_folder = os.getenv('APPDATA') + '\\HardlySoftware\\'
-  token_file = app_folder + "token"
-elif(os.name == 'posix'):
-  app_folder = expanduser('~')
-  token_file = app_folder + "/.preheat"
-else:
-  print 'You are running preheat on an unsupported operating system.'
-  sys.exit(1)
-
-access_token = None
-
-try:
-  with open(token_file, 'r') as f:
-    access_token = f.read()
-except IOError:
-    access_token = None
-
-if access_token == None:
-  flow = DropboxOAuth2FlowNoRedirect(app_key, app_secret)
-
-  authorize_url = flow.start()
-  print '1. Go to: ' + authorize_url
-  print '2. Click "Allow" (you might have to log in first)'
-  print '3. Copy the authorization code.'
-  code = raw_input("Enter the authorization code here: ").strip()
-
-  try:
-    access_token, user_id = flow.finish(code)
-  except dbrest.ErrorResponse, e:
-    print('Error: %s' % (e,))
-    print 'Make sure you have created your Dropbox app and entered the correct authorization code'
-    sys.exit(1)
-
-  if not os.path.exists(app_folder):
-    os.makedirs(app_folder)
-
-  with open(token_file, 'w') as f:
-    f.write(access_token)
-
-  print 'Account Linked!'
-
-client = DropboxClient(access_token)
-# Add a test to see if the client is valid
+if piClient.is_authorized() == False:
+  piClient.authorize()
 
 if len(sys.argv) >= 2:
   target_filename = str(sys.argv[1])
-  # Try to pull the file from dropbox
-  metadata = client.search("/", target_filename)
-  
-  # if metadata has more than one item prompt the user which file to pull
-  target_meta = None
-  if len(metadata) > 1:
-    target_meta = choose_file(metadata)
-  elif len(metadata) == 0:
-    target_meta = None
+  if check_for_arg('-r'):
+    piClient.fetch(target_filename, True)
   else:
-    target_meta = metadata[0]
-
-  if target_meta != None:
-    last_slash = target_meta['path'].rfind("/")
-    folder = target_meta['path'][:(last_slash + 1)]
-
-    if check_for_arg('-f'):
-      # Pull all files from the same folder
-      get_entire_folder(client, folder, folder)
-    else:
-      get_file(client, folder, target_meta)
-
-  else:
-    # See if the file is local
-    try:
-      with open(target_filename, 'r') as f:
-        print 'I did not find that file in your Dropbox but did find it locally'
-    except IOError:
-        print 'Could not find ' + target_filename + ' in your Dropbox or locally. Check the name and try again.'
-        sys.exit(1)
-
-    choice = raw_input("Would you like to run the local file (y/n)? ")
-    if choice.upper() != 'Y':
-      sys.exit(1)
-
-  # run the downloaded file
-  if(not check_for_arg('-d')):
-    if(os.name == 'nt'):
-      os.system('python ' + target_filename)
-    else:
-      os.system('sudo python ' + target_filename)
-
+    piClient.fetch(target_filename, False)
 else:
   print "You forgot to tell me which file to preheat."
   print "Usage:"
-  print "    [sudo] python preheat [target file to launch]"
+  print "    [sudo] preheat [file to fetch]"
